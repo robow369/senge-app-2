@@ -1,12 +1,13 @@
 import { useState, ChangeEvent } from 'react';
-import { PlusCircle, CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import { PlusCircle, CheckCircle, AlertCircle, Loader, PenLine } from 'lucide-react';
 import { FormData, FormErrors, Dependent } from '../types/form';
 import { formatCPF, formatRG, formatCEP, formatPhone, formatDate } from '../utils/formatters';
 import { validateCPF, validateRG, validateCEP, validateEmail, validatePhone, validateDate, validateYear, validateRequired } from '../utils/validators';
-import { updateUser } from '../api/mockApi';
 import FormSection from './FormSection';
 import FormField from './FormField';
 import DependentRow from './DependentRow';
+import SignatureModal from './signature/SignatureModal';
+import { useSignatureFlow } from '../hooks/useSignatureFlow';
 
 const ESTADO_CIVIL_OPTIONS = [
   { value: 'solteiro', label: 'Solteiro(a)' },
@@ -186,8 +187,8 @@ function validateForm(form: FormData): { errors: FormErrors; valid: boolean } {
 export default function RegistrationForm() {
   const [form, setForm] = useState<FormData>(initialForm);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
+  const { flowStatus, signingData, flowError, startSigning, reset } = useSignatureFlow();
 
   function handleChange(e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target;
@@ -229,23 +230,12 @@ export default function RegistrationForm() {
     setErrors(validationErrors);
 
     if (!valid) {
-      const firstError = document.querySelector('[data-error="true"]');
+      const firstError = document.querySelector('[class*="border-red"]');
       if (firstError) firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const result = await updateUser(form);
-      setSubmitResult({ success: result.success, message: result.message });
-      if (result.success) {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    } catch (err) {
-      setSubmitResult({ success: false, message: err instanceof Error ? err.message : 'Erro inesperado.' });
-    } finally {
-      setSubmitting(false);
-    }
+    await startSigning(form);
   }
 
   const field = (
@@ -269,8 +259,23 @@ export default function RegistrationForm() {
     />
   );
 
+  const isGenerating = flowStatus === 'generating';
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      {signingData && flowStatus === 'pending_signature' && (
+        <SignatureModal
+          submissionId={signingData.submissionId}
+          signingLink={signingData.signingLink}
+          onClose={reset}
+          onComplete={(success, message) => {
+            reset();
+            setSubmitResult({ success, message });
+            if (success) window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
+
       {submitResult && (
         <div
           className={`mb-6 flex items-start gap-3 p-4 rounded-lg border ${
@@ -283,6 +288,16 @@ export default function RegistrationForm() {
           <div>
             <p className="font-semibold">{submitResult.success ? 'Sucesso!' : 'Erro'}</p>
             <p className="text-sm mt-0.5">{submitResult.message}</p>
+          </div>
+        </div>
+      )}
+
+      {flowError && flowStatus === 'failed' && (
+        <div className="mb-6 flex items-start gap-3 p-4 rounded-lg border bg-red-50 border-red-200 text-red-800">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Erro ao iniciar assinatura</p>
+            <p className="text-sm mt-0.5">{flowError}</p>
           </div>
         </div>
       )}
@@ -399,19 +414,31 @@ export default function RegistrationForm() {
           </p>
         </div>
 
+        <div className="bg-[#3dbce7]/10 border border-[#3dbce7]/30 rounded-lg p-4 mb-6 flex items-start gap-3">
+          <PenLine size={18} className="text-[#1a237e] shrink-0 mt-0.5" />
+          <p className="text-xs text-[#1a237e]">
+            Ao clicar em <strong>Assinar e Enviar</strong>, um documento PDF será gerado com seus dados e enviado para assinatura digital via{' '}
+            <strong>certificado ICP-Brasil</strong>. Você poderá assinar com certificado em nuvem (BirdID, SafeID, VIDaaS, entre outros)
+            ou com cartão/token físico — sem necessidade de gerenciar chaves criptográficas.
+          </p>
+        </div>
+
         <div className="flex justify-center">
           <button
             type="submit"
-            disabled={submitting}
+            disabled={isGenerating}
             className="bg-[#1a237e] hover:bg-[#283593] disabled:bg-gray-400 text-white font-bold py-3 px-12 rounded-lg text-sm tracking-widest uppercase transition-all duration-200 flex items-center gap-3 shadow-md hover:shadow-lg disabled:cursor-not-allowed"
           >
-            {submitting ? (
+            {isGenerating ? (
               <>
                 <Loader size={18} className="animate-spin" />
-                Enviando...
+                Gerando documento...
               </>
             ) : (
-              'Enviar Atualização'
+              <>
+                <PenLine size={18} />
+                Assinar e Enviar
+              </>
             )}
           </button>
         </div>
